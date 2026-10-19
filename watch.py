@@ -50,6 +50,8 @@ def server_alive() -> bool:
 
 
 def send(text: str):
+    if os.environ.get("WATCH_TEST") == "1":   # учебный прогон: владелец заранее предупреждён, текст помечен
+        text = "🧪 УЧЕБНАЯ ТРЕВОГА — не реагируйте\n" + text
     body = urllib.parse.urlencode({"chat_id": os.environ["TG_CHAT"], "text": text}).encode()
     try:
         urllib.request.urlopen(f"https://api.telegram.org/bot{os.environ['TG_TOKEN']}/sendMessage", body, timeout=20)
