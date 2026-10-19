@@ -16,6 +16,7 @@ STATE = "state/status.json"
 FAILS_TO_ALERT = 2        # две проверки подряд (~10 мин): одиночный сбой сети не тревожит
 REPEAT_MIN = 30           # пока лежит — напоминать раз в 30 минут
 ALMATY = timezone(timedelta(hours=5))
+STALE_SEC = 180          # /health отдаёт ts сторожа на сервере; старше 3 минут — сторож там завис
 
 
 def check() -> tuple:
@@ -25,9 +26,9 @@ def check() -> tuple:
         try:
             with urllib.request.urlopen(os.environ["HEALTH_URL"], timeout=20) as r:
                 data = json.loads(r.read().decode())
-            if "ok" in data:   # сервер жив; поломки отдельных частей сообщает сторож на самом сервере
-                return True, ""
-            reason = "сервер отвечает не тем"
+            if "ok" in data and time.time() - data.get("ts", 0) < STALE_SEC:
+                return True, ""   # сервер жив; поломки отдельных частей сообщает сторож на самом сервере
+            reason = "сторож на сервере не обновляется" if "ok" in data else "сервер отвечает не тем"
         except Exception as e:
             reason = f"сервер не отвечает ({type(e).__name__})"
         if attempt == 0:
