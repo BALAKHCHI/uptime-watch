@@ -13,7 +13,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 STATE = "state/status.json"
-FAILS_TO_ALERT = 2        # две проверки подряд (~10 мин): одиночный сбой сети не тревожит
+FAILS_TO_ALERT = 2        # две проверки подряд (~5–10 мин), если не отвечает весь сервер
+FAILS_SOFT = 3            # сервер жив (Coolify отвечает), но /health нет — ждём дольше: при выкладке боты перезапускаются
 REPEAT_MIN = 30           # пока лежит — напоминать раз в 30 минут
 ALMATY = timezone(timedelta(hours=5))
 STALE_SEC = 180          # /health отдаёт ts сторожа на сервере; старше 3 минут — сторож там завис
@@ -34,6 +35,18 @@ def check() -> tuple:
         if attempt == 0:
             time.sleep(20)
     return False, reason
+
+
+def server_alive() -> bool:
+    """/health не отвечает — жив ли сам сервер? Если панель Coolify открывается, это скорее выкладка или перезапуск ботов."""
+    url = os.environ.get("COOLIFY_URL")
+    if not url:
+        return False
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            return r.status < 500
+    except Exception:
+        return False
 
 
 def send(text: str):
@@ -68,9 +81,13 @@ def main():
     else:
         st["fails"] = st.get("fails", 0) + 1
         st.setdefault("down_since", now)
-        if st["fails"] >= FAILS_TO_ALERT and not st.get("alerted"):
-            send(f"🚨 Сервер Caramel: {reason}.\nС {hm(st['down_since'])} по Алматы · проверено GitHub-сторожем.\n"
-                 "Боты в Битриксе и Telegram, скорее всего, не работают. Напишите в Claude «сервер лёг».")
+        alive = server_alive()
+        if alive:
+            reason = "сервер жив, но боты и сторож на нём не отвечают (перезапуск или сбой выкладки)"
+        if st["fails"] >= (FAILS_SOFT if alive else FAILS_TO_ALERT) and not st.get("alerted"):
+            what = ("Проверьте Coolify → caramel-bots → Logs или напишите в Claude «боты не отвечают»." if alive else
+                    "Боты в Битриксе и Telegram, скорее всего, не работают. Напишите в Claude «сервер лёг».")
+            send(f"🚨 Сервер Caramel: {reason}.\nС {hm(st['down_since'])} по Алматы · проверено GitHub-сторожем.\n{what}")
             st["alerted"] = st["last_alert"] = now
         elif st.get("alerted") and now - st.get("last_alert", 0) >= REPEAT_MIN * 60:
             mins = round((now - st["down_since"]) / 60)
