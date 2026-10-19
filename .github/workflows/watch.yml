@@ -1,0 +1,50 @@
+name: watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # только для ежемесячного пустого коммита: GitHub отключает расписание в репозитории без активности 60 дней
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - name: check server
+        run: python3 watch.py
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+
+      - name: keepalive
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 30 * 86400 )) ]; then
+            git config user.name "watch-bot"
+            git config user.email "watch-bot@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive"
+            git push
+          fi
